@@ -36,6 +36,8 @@ export function FileUpload({ dict }: FileUploadProps) {
   const [fileInfo, setFileInfo] = useState<{ name: string; size: string } | null>(null)
   const { toast } = useToast()
   const { setFile, apiKey, setApiKey, resetTranslation } = useTranslate()
+
+  setApiKey("dummy")
   
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
@@ -177,7 +179,7 @@ export function FileUpload({ dict }: FileUploadProps) {
         </label>
       </div>
 
-      <div>
+      <div className="hidden">
         <h2 className="text-xl font-semibold flex items-center gap-2">
           <KeyIcon className="w-5 h-5" />
           {dict.apiKeyTitle || "OpenAI API Key"}

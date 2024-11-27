@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useTranslate } from "@/context/TranslateContext"
-import { translate } from "@/lib/openai"
+import { translate } from "@/lib/ollama"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { chunkJsonObject, mergeTranslatedChunks } from "@/lib/json-utils"
 import { ChevronDown, Languages, Loader2 } from "lucide-react"
 import { getDictionary } from "@/lib/getDictionary"
-import { validateApiKey } from "@/lib/openai"
+import { validateApiKey } from "@/lib/ollama"
 
 interface TranslatedResult {
   lang: string;
@@ -246,7 +246,7 @@ export function TranslatePanel({ dict }: TranslatePanelProps) {
 
     // 添加API密钥验证
     try {
-      await validateApiKey(apiKey);
+      await validateApiKey();
     } catch (err) {
       let errorMessage = translations.apiKeyErrors.validationFailed;
       
@@ -354,99 +354,66 @@ export function TranslatePanel({ dict }: TranslatePanelProps) {
 
         for (let i = savedLangChunks.length; i < chunks.length; i++) {
           if (cancelTranslation) {
-            break
+            break;
           }
-          
+
           try {
-            const chunk = chunks[i]
+            const chunk = chunks[i];
             const translatedChunk = await translate(
-              JSON.stringify(chunk),
-              lang,
-              apiKey,
-              controller.signal,
-              (progress) => {
-                const singleChunkProgress = progress / 100
-                const overallProgress = ((currentCompletedChunks + singleChunkProgress) / calculatedTotalChunks) * 100
-                setTotalProgress(Math.round(overallProgress))
-              },
-              (content) => {
-                setStreamContent(content)
-                try {
-                  // 如果翻译被取消，不进行 JSON 解析
-                  if (cancelTranslation) return
-                  
-                  const parsedStreamContent = JSON.parse(`{${content}}`)
-                  const mergedContent = mergeTranslatedChunks([
-                    currentLangContent,
-                    parsedStreamContent
-                  ])
-                  
-                  const resultIndex = results.findIndex(r => r.lang === lang)
-                  if (resultIndex !== -1) {
-                    results[resultIndex] = {
-                      lang,
-                      content: JSON.stringify(mergedContent, null, 2)
+                JSON.stringify(chunk),
+                lang,
+                controller.signal,
+                (progress) => {
+                  const singleChunkProgress = progress / 100;
+                  const overallProgress =
+                      ((currentCompletedChunks + singleChunkProgress) / calculatedTotalChunks) * 100;
+                  setTotalProgress(Math.round(overallProgress));
+                },
+                (content) => {
+                  setStreamContent(content);
+                  try {
+                    // 如果翻译被取消，不进行 JSON 解析
+                    if (cancelTranslation) return;
+
+                    // Since `content` is the accumulated full content so far,
+                    // we attempt to parse it as JSON directly
+                    const parsedStreamContent = JSON.parse(content);
+                    const mergedContent = mergeTranslatedChunks([
+                      currentLangContent,
+                      parsedStreamContent,
+                    ]);
+
+                    const resultIndex = results.findIndex((r) => r.lang === lang);
+                    if (resultIndex !== -1) {
+                      results[resultIndex] = {
+                        lang,
+                        content: JSON.stringify(mergedContent, null, 2),
+                      };
+                    } else {
+                      results.push({
+                        lang,
+                        content: JSON.stringify(mergedContent, null, 2),
+                      });
                     }
-                  } else {
-                    results.push({
-                      lang,
-                      content: JSON.stringify(mergedContent, null, 2)
-                    })
+                    setTranslatedResults([...results]);
+                  } catch (error) {
+                    // 如果是取消操作，忽略错误
+                    if (cancelTranslation) return;
+
+                    console.warn('Stream content parse error:', error);
                   }
-                  setTranslatedResults([...results])
-                } catch (error) {
-                  // 如果是取消操作，忽略错误
-                  if (cancelTranslation) return
-                  
-                  console.warn('Stream content parse error:', error)
                 }
-              }
-            )
-            
-            // 如果翻译被取消，跳出循环
-            if (!translatedChunk || cancelTranslation) {
-              break
-            }
+            );
 
-            const parsedChunk = JSON.parse(translatedChunk)
-            translatedChunks.push(parsedChunk)
-            
-            currentLangContent = mergeTranslatedChunks([
-              currentLangContent,
-              parsedChunk
-            ])
-
-            const resultIndex = results.findIndex(r => r.lang === lang)
-            if (resultIndex !== -1) {
-              results[resultIndex] = {
-                lang,
-                content: JSON.stringify(currentLangContent, null, 2)
-              }
-            } else {
-              results.push({
-                lang,
-                content: JSON.stringify(currentLangContent, null, 2)
-              })
-            }
-            setTranslatedResults([...results])
-            
-            savedChunks[lang] = translatedChunks
-            localStorage.setItem(
-              `translation_progress_${file.name}`,
-              JSON.stringify(savedChunks)
-            )
-            
-            currentCompletedChunks++
-            setCompletedChunks(currentCompletedChunks)
+            // After the translation of the chunk is complete, update the progress
+            currentCompletedChunks += 1;
+            const overallProgress = (currentCompletedChunks / calculatedTotalChunks) * 100;
+            setTotalProgress(Math.round(overallProgress));
           } catch (error) {
-            // 如果是取消操作，跳出循环
-            if (cancelTranslation || (error instanceof DOMException && error.name === 'AbortError')) {
-              break
-            }
-            // 其他错误则继续处理下一个块
-            continue
+            console.error('Error during translation:', error);
           }
         }
+
       }
       
       // Clear saved progress
